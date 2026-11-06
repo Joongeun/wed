@@ -42,6 +42,10 @@ export async function startServer(opts) {
   const root = path.resolve(opts.root || (mode === 'static' ? opts.folder : process.cwd()));
   const store = new Store(root);
   const upstream = opts.upstream ? new URL(opts.upstream) : null;
+  // Built once at startup, so the page's overlay always matches this process's
+  // server code. Building per request served new overlay code to a server still
+  // running old handlers after an update, and edits it could not save got queued.
+  const overlayBundle = buildOverlay({ mode, refMode: false });
   const sseClients = new Set();
   const waiters = [];
   let lastWaiterSeen = 0;
@@ -108,7 +112,7 @@ export async function startServer(opts) {
     const p = u.pathname.slice('/__wed'.length);
     const m = req.method;
     if (p === '/overlay.js') {
-      const body = buildOverlay({ mode, refMode: false });
+      const body = overlayBundle;
       res.writeHead(200, { 'content-type': MIME['.js'], 'cache-control': 'no-store' });
       return res.end(body);
     }
