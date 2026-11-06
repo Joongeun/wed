@@ -87,6 +87,36 @@ function isLeafText(el) {
   return Array.from(el.childNodes).every((n) => n.nodeType === 3 || n.nodeType === 8) && el.textContent.trim().length > 0;
 }
 
+const INLINE_TAGS = new Set(['A', 'ABBR', 'B', 'BR', 'CITE', 'CODE', 'DATA', 'DEL', 'DFN', 'EM', 'I', 'INS', 'KBD',
+  'MARK', 'Q', 'S', 'SAMP', 'SMALL', 'SPAN', 'STRONG', 'SUB', 'SUP', 'TIME', 'U', 'WBR']);
+// Elements that usually hold one run of text. Climbing stops at the first of these.
+const TEXT_BLOCKS = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'P', 'LI', 'BUTTON', 'LABEL', 'FIGCAPTION', 'BLOCKQUOTE',
+  'DT', 'DD', 'TD', 'TH', 'SUMMARY', 'LEGEND', 'CAPTION', 'A']);
+
+/** Text plus inline formatting only, e.g. <h1>Every way <mark>one place</mark></h1>. */
+function isRichText(el) {
+  if (!el || !el.textContent.trim()) return false;
+  if (el.closest && el.closest('svg')) return false;
+  for (const d of el.querySelectorAll('*')) if (!INLINE_TAGS.has(d.tagName)) return false;
+  return true;
+}
+
+/**
+ * The element a double-click should edit. From the clicked element, climb while the
+ * parent is still pure text, so a click on <mark> inside a heading edits the whole
+ * heading. Stops at the first text block such as h1 or p. Null when nothing fits.
+ */
+function editTarget(el) {
+  if (!isRichText(el)) return null;
+  let best = el;
+  while (!TEXT_BLOCKS.has(best.tagName)) {
+    const up = best.parentElement;
+    if (!up || up === document.body || !isRichText(up)) break;
+    best = up;
+  }
+  return best;
+}
+
 const KEY_STYLES = ['display', 'position', 'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing',
   'color', 'background-color', 'background-image', 'padding', 'margin', 'gap', 'border', 'border-radius', 'box-shadow',
   'width', 'height', 'max-width', 'text-align', 'flex-direction', 'justify-content', 'align-items', 'grid-template-columns', 'opacity'];

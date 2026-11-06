@@ -46,7 +46,7 @@ Node 20 or newer is required. Screenshots and the inspiration board use Playwrig
 ### The six features
 
 1. **Click, describe, send.** Hover highlighting, a note popover, a queue with numbered pins, batch Send, live reload, and a width switcher (375, 768 and 1280 px). A reload never happens while you are halfway through typing a note. It waits until you close the note.
-2. **Inline text editing.** In pick mode, double-click any text element, retype it, and press Enter. `wed` writes the change straight into the HTML file in under a second, with no Claude turn. It refuses when the element mixes text with other tags, or when the page text does not match the file. In those cases the change is queued for Claude instead, so it is never lost.
+2. **Inline text editing.** In pick mode, double-click any text, retype it, and press Enter. `wed` writes the change straight into the HTML file in under a second, with no Claude turn. Headings with inline formatting work too. Double-clicking anywhere in `<h1>Every way <mark>one place</mark></h1>` edits the whole heading and keeps the `<mark>`. Elements that hold layout blocks, such as a `<div>` with paragraphs inside, show a message asking for a note instead. If the page text does not match the file, the change is queued for Claude, so it is never lost.
 3. **Undo per batch.** Before Claude touches anything, `wed` copies the project's source files into `.wed/snapshots/<batch>/`. The Revert button in the page restores them byte for byte. This works without git.
 4. **Taste log.** Every edit is recorded in `~/.wed/taste.jsonl` with its outcome. The outcome is kept, reverted, or re-edited if you changed the same element again within 2 minutes. `/live-edit` reads `wed taste` at the start, and Claude writes recurring preferences into `~/.wed/taste.md`. The log is global, so what Claude learns on one site carries over to the next.
 5. **Style nudge panel.** Click **Style** in the popover to get sliders for font size, weight, line height, letter spacing, padding, margin, gap, radius, max width and opacity, plus color pickers. Changes preview live. Claude receives the exact before and after values and writes them into the stylesheet rather than as inline styles.
@@ -78,7 +78,7 @@ Options for starting a session: `--port 4747`, `--root <dir>` (the project folde
 npm test
 ```
 
-There are 25 tests. They cover source-line tagging (including a real site when `WED_REAL_SITE` is set), text edits and their refusals, injection through gzip and chunked proxies, the full wait, done and revert loop, re-edit detection, and 8 browser tests in headless Chromium. The browser tests click, queue, nudge, inline-edit, check that reloads wait while you type, and run both inspiration flows.
+There are 29 tests. They cover source-line tagging (including a real site when `WED_REAL_SITE` is set), text edits and their refusals, injection through gzip and chunked proxies, the full wait, done and revert loop, re-edit detection, and 10 browser tests in headless Chromium. The browser tests click, queue, nudge, inline-edit plain and formatted headings, check that reloads wait while you type, and run both inspiration flows.
 
 ## Proposed for later
 

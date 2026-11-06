@@ -58,12 +58,26 @@ document.addEventListener('click', (e) => {
 }, true);
 
 document.addEventListener('dblclick', (e) => {
-  if (!swallow(e) || REF_MODE) return;
+  if (REF_MODE || isOverlayEvent(e) || W.editingEl) return;
   const el = targetFromEvent(e);
-  if (el && isLeafText(el)) {
-    closePopover();
-    startTextEdit(el);
+  if (!W.pickMode) {
+    // Outside pick mode a double-click keeps its normal meaning (select a word),
+    // but say once how to edit, so it never looks broken.
+    if (el && editTarget(el) && !ss.get('dblHint', false)) {
+      ss.set('dblHint', true);
+      toast('To edit text: press P, then double-click it', '', [], 3500);
+    }
+    return;
   }
+  swallow(e);
+  if (!el) return;
+  const target = editTarget(el);
+  if (!target) {
+    toast('This element holds other blocks, so it cannot be retyped in place. Describe the change in the note instead.', 'warn', [], 4500);
+    return;
+  }
+  closePopover();
+  startTextEdit(target);
 }, true);
 
 function popHasInput() {
@@ -162,13 +176,13 @@ function openPopover(el) {
       positionPopover();
     },
   }, 'Style ▾');
-  const leaf = isLeafText(el);
+  const editable = editTarget(el);
   const textBtn = h('button.small', {
-    disabled: !leaf,
-    title: leaf ? 'Edit the words in place (or double-click the text)' : 'This element contains other tags; describe the change instead',
+    disabled: !editable,
+    title: editable ? 'Edit the words in place (or double-click the text)' : 'This element holds other blocks; describe the change instead',
     onclick: () => {
       closePopover();
-      startTextEdit(el);
+      startTextEdit(editable);
     },
   }, 'Edit text');
   const parentBtn = h('button.small.ghost', {
@@ -267,14 +281,37 @@ function fullStyles(el) {
 
 // ---- inline text editing ------------------------------------------------------
 
+/** innerHTML as it should be written to disk: wed's own attributes removed. */
+function cleanInnerHtml(el) {
+  const c = el.cloneNode(true);
+  for (const d of c.querySelectorAll('[data-wed-src],[contenteditable]')) {
+    d.removeAttribute('data-wed-src');
+    d.removeAttribute('contenteditable');
+  }
+  return c.innerHTML;
+}
+
 function startTextEdit(el) {
   const before = el.textContent;
+  const rich = !isLeafText(el); // holds inline tags such as <mark>, which must survive the edit
+  const beforeHtml = el.innerHTML;
+  const beforeClean = rich ? cleanInnerHtml(el) : null;
   const src = srcOf(el);
   W.busy = true;
   W.editingEl = el;
   showHighlight(el, true);
-  el.setAttribute('contenteditable', 'plaintext-only');
-  if (el.contentEditable !== 'plaintext-only') el.setAttribute('contenteditable', 'true');
+  if (rich) {
+    el.setAttribute('contenteditable', 'true');
+  } else {
+    el.setAttribute('contenteditable', 'plaintext-only');
+    if (el.contentEditable !== 'plaintext-only') el.setAttribute('contenteditable', 'true');
+  }
+  // Pasting rich content would drag in foreign markup; paste plain text only.
+  const onPaste = (e) => {
+    e.preventDefault();
+    document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+  };
+  el.addEventListener('paste', onPaste, true);
   el.focus();
   const range = document.createRange();
   range.selectNodeContents(el);
@@ -289,12 +326,18 @@ function startTextEdit(el) {
     finished = true;
     el.removeEventListener('keydown', onKey, true);
     el.removeEventListener('blur', onBlur, true);
+    el.removeEventListener('paste', onPaste, true);
     el.removeAttribute('contenteditable');
     W.editingEl = null;
     showHighlight(null);
     const after = el.textContent;
-    if (!save || after.trim() === before.trim()) {
-      el.textContent = before;
+    let afterHtml = rich ? cleanInnerHtml(el) : null;
+    // Editable regions turn typed spaces at edges into &nbsp;. Keep them only if the source had them.
+    if (rich && !beforeClean.includes('&nbsp;')) afterHtml = afterHtml.replace(/&nbsp;/g, ' ');
+    const unchanged = rich ? afterHtml === beforeClean : after.trim() === before.trim();
+    if (!save || unchanged) {
+      if (rich) el.innerHTML = beforeHtml;
+      else el.textContent = before;
       W.busy = false;
       if (W.pendingReload) W.reloadNow();
       return;
@@ -302,7 +345,7 @@ function startTextEdit(el) {
     let result = { ok: false, reason: 'proxy mode: no source lines' };
     if (src && W.state.mode === 'static') {
       try {
-        result = await api('POST', '/text', { src, oldText: before, newText: after, tag: el.tagName.toLowerCase(), selector: buildSelector(el) });
+        result = await api('POST', '/text', { src, oldText: before, newText: after, newHtml: afterHtml, tag: el.tagName.toLowerCase(), selector: buildSelector(el) });
       } catch (err) {
         result = { ok: false, reason: err.message };
       }
@@ -311,14 +354,18 @@ function startTextEdit(el) {
       toast(`Saved to ${result.file}:${result.line}`, 'ok', [], 2500);
     } else {
       // Fall back to a note so the change is never lost.
-      el.textContent = before;
+      const editedHtml = el.innerHTML;
+      if (rich) el.innerHTML = beforeHtml;
+      else el.textContent = before;
       await api('POST', '/items', {
         ...describe(el),
         kind: 'text',
-        instruction: `Change this text from:\n"${before.trim()}"\nto:\n"${after.trim()}"`,
+        instruction: rich
+          ? `Change this element's contents to (keep the inline tags as shown):\n${afterHtml}`
+          : `Change this text from:\n"${before.trim()}"\nto:\n"${after.trim()}"`,
         textChange: { from: before.trim(), to: after.trim() },
       }).catch(() => {});
-      el.textContent = after;
+      el.innerHTML = editedHtml;
       toast(`Queued for Claude (${result.reason})`, 'warn', [], 4000);
     }
     W.busy = false;
@@ -326,7 +373,11 @@ function startTextEdit(el) {
   };
   const onKey = (e) => {
     e.stopPropagation();
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && e.shiftKey && rich) {
+      // A rich editor would insert a <div> here; a <br> is what a heading needs.
+      e.preventDefault();
+      document.execCommand('insertLineBreak');
+    } else if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       finish(true);
     } else if (e.key === 'Escape') {

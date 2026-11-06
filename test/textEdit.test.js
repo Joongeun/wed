@@ -50,3 +50,21 @@ test('refuses template syntax and paths outside the root', () => {
   const dir = freshSite();
   assert.equal(applyTextEdit(dir, '../../etc/passwd:1:1', 'a', 'b').ok, false);
 });
+
+test('rich mode: edits a heading that contains <mark> and keeps the tag', () => {
+  const html = '<body>\n  <h1 class="t">Every way. <mark>One place</mark> to sort.</h1>\n</body>';
+  const r = replaceTextInHtml(html, 2, 3, 'Every way. One place to sort.', 'Every way. One spot to sort it.', 'Every way. <mark>One spot</mark> to sort it.');
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(r.html, '<body>\n  <h1 class="t">Every way. <mark>One spot</mark> to sort it.</h1>\n</body>');
+});
+
+test('rich mode: refuses layout blocks, stale text, and unsafe markup', () => {
+  const block = '<body>\n<div>Intro <p>para</p></div>\n</body>';
+  assert.match(replaceTextInHtml(block, 2, 1, 'Intro para', 'x', 'x').reason, /layout blocks/);
+  const h = '<body>\n<h1>Hi <em>there</em></h1>\n</body>';
+  assert.equal(replaceTextInHtml(h, 2, 1, 'Hi you', 'x', 'x').ok, false);
+  for (const bad of ['Hi <img src=x onerror=alert(1)>', 'Hi <script>x</script>', 'Hi <div>x</div>', 'Hi <a href="javascript:x">y</a>', 'Hi <em onclick="x">y</em>']) {
+    assert.equal(replaceTextInHtml(h, 2, 1, 'Hi there', 'x', bad).ok, false, bad);
+  }
+  assert.equal(replaceTextInHtml(h, 2, 1, 'Hi there', 'Hi friend', 'Hi <em>friend</em><br>').ok, true);
+});

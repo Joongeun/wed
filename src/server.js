@@ -214,7 +214,7 @@ export async function startServer(opts) {
     if (p === '/text' && m === 'POST') {
       const body = await readBody(req);
       if (mode !== 'static') return sendJson(res, 200, { ok: false, reason: 'proxy mode: no source lines' });
-      const r = applyTextEdit(root, body.src, body.oldText || '', body.newText || '');
+      const r = applyTextEdit(root, body.src, body.oldText || '', body.newText || '', typeof body.newHtml === 'string' ? body.newHtml : null);
       if (r.ok) {
         // Direct edits skip Claude, but they still teach the taste log what copy was changed.
         store.addItem({ kind: 'text', src: body.src, tag: body.tag, selector: body.selector, text: body.oldText,

@@ -180,3 +180,30 @@ test('inspiration: reference mode saves a clicked element with styles and a crop
   assert.ok(fs.existsSync(path.join(WED_HOME, 'refs', 'fixture-el', 'elements', 'soft-card.png')));
   assert.ok(listRefs().refs.find((r) => r.name === 'fixture-el').elements.includes('soft-card'));
 });
+
+test('double-click inside a heading with <mark> edits the whole heading and keeps the tag', { skip }, async () => {
+  await freshPage();
+  await page.keyboard.press('p');
+  await page.dblclick('h2.tagline mark');
+  await page.waitForFunction(() => document.querySelector('h2.tagline').isContentEditable);
+  assert.equal(await page.evaluate(() => document.querySelector('[contenteditable]').tagName), 'H2');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Today.');
+  await page.keyboard.press('Enter');
+  const file = path.join(srv.root, 'index.html');
+  await until(() => fs.readFileSync(file, 'utf8').includes('<h2 class="tagline">Every way to get rid of it. <mark>One place</mark> to sort it out. Today.</h2>'));
+  assert.deepEqual(errors, []);
+});
+
+test('double-click never fails silently: hint outside pick mode, warning on layout blocks', { skip }, async () => {
+  await freshPage();
+  await page.dblclick('h1.hero-title');
+  await page.locator('wed-overlay .toast', { hasText: 'press P' }).waitFor();
+  assert.equal(await page.locator('[contenteditable]').count(), 0);
+
+  await page.keyboard.press('p');
+  const box = await page.locator('section.cards').boundingBox();
+  await page.mouse.dblclick(box.x + 4, box.y + 4); // the section's own padding, not a card
+  await page.locator('wed-overlay .toast', { hasText: 'cannot be retyped' }).waitFor();
+  assert.equal(await page.locator('[contenteditable]').count(), 0);
+});
