@@ -8,7 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { startServer, buildOverlay } from '../src/server.js';
 import { readJson, readTaste, WED_HOME } from '../src/store.js';
-import { addRef, openRef, listRefs, refPaths } from '../src/refs.js';
+import { addRef, openRef, listRefs } from '../src/refs.js';
+import { formatBatch } from '../src/format.js';
+
+export { formatBatch };
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..');
@@ -19,6 +22,7 @@ Start a session
   wed [folder]                 Serve a static site folder (default: .) with the overlay
   wed <url|port>               Proxy a running dev server, e.g. wed 4000 (Jekyll)
       --port 4747  --root <dir>  --no-open  --watch-site
+      --fast-model sonnet|haiku|off   model for exact text/style edits (default sonnet)
 
 Commands Claude runs (via /live-edit)
   wed wait                     Block until you press Send, print the batch, exit
@@ -98,46 +102,6 @@ async function call(method, p, body, server = findServer()) {
   return { status: r.status, data: text ? JSON.parse(text) : null };
 }
 
-// ---- formatting a batch for Claude -------------------------------------------
-
-export function formatBatch(payload) {
-  const { batch, items, root, mode, url } = payload;
-  const lines = [];
-  lines.push(`WED BATCH ${batch.id}: ${items.length} edit${items.length > 1 ? 's' : ''} from ${url} (${mode} mode)`);
-  lines.push(`Project root: ${root}`);
-  lines.push(`Snapshot saved, so the user can revert this batch from the page.`);
-  lines.push(`When finished: wed done <id> --note "what you changed" for each item (or --failed with the reason).`);
-  lines.push('');
-  items.forEach((it, i) => {
-    lines.push(`[${i + 1}] id=${it.id}  kind=${it.kind}`);
-    lines.push(`  instruction: ${String(it.instruction || '').replace(/\n/g, '\n    ')}`);
-    if (it.src) lines.push(`  source: ${it.src}  (exact start tag; file relative to project root)`);
-    else lines.push(`  source: unknown (proxy mode). Search for the text or classes below.`);
-    lines.push(`  element: <${it.tag}> "${(it.text || '').slice(0, 120)}"`);
-    lines.push(`  selector: ${it.selector}`);
-    if (it.viewport) lines.push(`  viewport: ${it.viewport.w}x${it.viewport.h} (${it.viewport.device})${it.viewport.device !== 'desktop' ? '  -> scope CSS changes to this breakpoint unless told otherwise' : ''}`);
-    if (it.styleDelta) {
-      lines.push(`  style changes previewed by the user (write these into the stylesheet, not inline):`);
-      for (const [k, v] of Object.entries(it.styleDelta)) lines.push(`    ${k}: ${v.from} -> ${v.to}`);
-    }
-    if (it.textChange) lines.push(`  text change: "${it.textChange.from}" -> "${it.textChange.to}"`);
-    if (it.refs && it.refs.length) {
-      lines.push(`  inspiration refs (read these files):`);
-      for (const r of it.refs) {
-        const ps = refPaths(r);
-        lines.push(`    ${r}: ${ps.length ? ps.join(' , ') : '(missing)'}`);
-      }
-    }
-    if (it.screenshot) lines.push(`  screenshot: ${it.screenshot}`);
-    if (it.styles && Object.keys(it.styles).length) {
-      lines.push(`  computed: ${Object.entries(it.styles).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
-    }
-    if (it.outerHTML) lines.push(`  outerHTML:\n    ${it.outerHTML.replace(/\n/g, '\n    ')}`);
-    lines.push('');
-  });
-  return lines.join('\n');
-}
-
 // ---- commands -------------------------------------------------------------------
 
 async function cmdStart(args) {
@@ -145,7 +109,8 @@ async function cmdStart(args) {
   let upstream = null;
   if (/^\d+$/.test(target)) upstream = `http://localhost:${target}`;
   else if (/^https?:\/\//.test(target)) upstream = target;
-  const opts = { port: Number(args.port || 4747), reloadDelay: args['reload-delay'] ? Number(args['reload-delay']) : undefined, watchSite: !!args['watch-site'] };
+  const fm = args['fast-model'];
+  const opts = { fastModel: fm === false || fm === 'off' ? null : typeof fm === 'string' ? fm : 'sonnet', port: Number(args.port || 4747), reloadDelay: args['reload-delay'] ? Number(args['reload-delay']) : undefined, watchSite: !!args['watch-site'] };
   if (upstream) {
     opts.upstream = upstream;
     opts.root = args.root || process.cwd();
@@ -168,6 +133,7 @@ async function cmdStart(args) {
   const shell = process.env.WED_QUIET ? () => {} : console.log;
   shell(`
   wed is running  ${srv.url}
+  ${opts.fastModel ? `exact text and slider edits go to ${opts.fastModel}; notes go to your /live-edit session` : 'every edit goes to your /live-edit session'}
   ${srv.mode === 'static' ? `serving ${srv.root} (every element tagged with its source line)` : `proxying ${upstream}, project root ${srv.root}`}
 
   In the page:   P to pick · click an element · describe it · Send

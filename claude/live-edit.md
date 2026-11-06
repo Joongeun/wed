@@ -12,6 +12,8 @@ You are in a live-edit loop with the `wed` overlay. The user is looking at the p
 3. Run `wed wait` with `run_in_background: true`. It exits when the user presses Send, and you are woken with its output.
 4. Tell the user, in one line, that you are listening and the page URL.
 
+Batches made only of exact edits (retyped text the page could not save directly, or slider values with no note) never reach you. `wed` sends them to a headless Sonnet run so they cost no main-session turn. You only receive batches that need judgment.
+
 ## Each batch
 
 When `wed wait` exits, its output lists every edit. For each item:

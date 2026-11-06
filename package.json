@@ -5,7 +5,7 @@
   "type": "module",
   "bin": { "wed": "bin/wed.js" },
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/"
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {

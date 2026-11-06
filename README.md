@@ -43,6 +43,8 @@ Node 20 or newer is required. Screenshots and the inspiration board use Playwrig
 
 **Claude listens through a background command, not the terminal.** `/live-edit` runs `wed wait` in the background. That command blocks until you press Send, prints the batch, and exits. Claude Code wakes Claude whenever a background command exits. Claude applies the batch, reports each item with `wed done`, and starts waiting again.
 
+**Exact edits skip the main session and go to Sonnet.** Some edits need no judgment: retyped text that `wed` could not write directly, or slider values with no note. Spending an Opus turn on those wastes tokens. `wed` sends any batch made only of such edits to a headless `claude -p --model sonnet` run in the project folder. That run can read and edit files, but it cannot run commands. Batches containing a free-form note or an inspiration ref still go to your `/live-edit` session. In one test, Sonnet applied a text change and a radius change in 14 seconds. If the Sonnet run cannot start, the batch falls back to the main session. Use `--fast-model haiku` for a cheaper model, or `--fast-model off` to send everything to the main session.
+
 ### The six features
 
 1. **Click, describe, send.** Hover highlighting, a note popover, a queue with numbered pins, batch Send, live reload, and a width switcher (375, 768 and 1280 px). A reload never happens while you are halfway through typing a note. It waits until you close the note.
@@ -65,7 +67,7 @@ Node 20 or newer is required. Screenshots and the inspiration board use Playwrig
 | `wed taste` | Recent edits grouped by outcome |
 | `wed ref add/open/ls` | Manage the inspiration board |
 
-Options for starting a session: `--port 4747`, `--root <dir>` (the project folder in proxy mode), `--no-open`, `--watch-site` (also reload on Jekyll `_site` changes), and `--reload-delay <ms>`.
+Options for starting a session: `--fast-model sonnet|haiku|off` (default `sonnet`), `--port 4747`, `--root <dir>` (the project folder in proxy mode), `--no-open`, `--watch-site` (also reload on Jekyll `_site` changes), and `--reload-delay <ms>`.
 
 ## Files it writes
 
@@ -78,7 +80,7 @@ Options for starting a session: `--port 4747`, `--root <dir>` (the project folde
 npm test
 ```
 
-There are 29 tests. They cover source-line tagging (including a real site when `WED_REAL_SITE` is set), text edits and their refusals, injection through gzip and chunked proxies, the full wait, done and revert loop, re-edit detection, and 10 browser tests in headless Chromium. The browser tests click, queue, nudge, inline-edit plain and formatted headings, check that reloads wait while you type, and run both inspiration flows.
+There are 33 tests. They cover source-line tagging (including a real site when `WED_REAL_SITE` is set), text edits and their refusals, injection through gzip and chunked proxies, the full wait, done and revert loop, re-edit detection, routing of exact edits to the fast model (with a stand-in `claude` program), and 10 browser tests in headless Chromium. The browser tests click, queue, nudge, inline-edit plain and formatted headings, check that reloads wait while you type, and run both inspiration flows.
 
 ## Proposed for later
 

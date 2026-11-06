@@ -97,8 +97,8 @@ export class Store {
   }
 
   /** Claim the oldest ready batch: snapshot files, mark it applying. */
-  claimNext() {
-    const batch = this.state.batches.find((b) => b.status === 'queued');
+  claimNext(status = 'queued') {
+    const batch = this.state.batches.find((b) => b.status === status);
     if (!batch) return null;
     batch.snapshot = this.snapshot(batch.id);
     batch.status = 'applying';
@@ -252,6 +252,7 @@ export class Store {
         textChange: it.textChange || null,
         refs: it.refs || [],
         element: { tag: it.tag, text: (it.text || '').slice(0, 80), src: it.src || null, selector: it.selector },
+        model: batch.model || 'main',
         status: it.status,
         resultNote: it.resultNote || '',
         files: batch.diff ? batch.diff.changed : [],

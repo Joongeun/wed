@@ -86,7 +86,7 @@ function renderPanel() {
     if (!its.length) continue;
     const when = new Date(b.finishedAt || b.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     sections.push(h('div.batch', null,
-      h('span.grow', null, `${b.status === 'reverted' ? 'Reverted' : 'Applied'} ${when}${b.changed && b.changed.length ? ' · ' + b.changed.join(', ') : ''}`),
+      h('span.grow', null, `${b.status === 'reverted' ? 'Reverted' : 'Applied'} ${when}${b.route && b.route !== 'main' ? ' by ' + b.route : ''}${b.changed && b.changed.length ? ' · ' + b.changed.join(', ') : ''}`),
       b.status === 'done' ? h('button.small.danger', { title: 'Restore files to before this batch', onclick: () => revert(b.id) }, 'Revert') : null,
     ));
     its.forEach((it) => sections.push(itemRow(it, 0)));
@@ -130,6 +130,10 @@ async function send() {
   try {
     const r = await api('POST', '/send');
     setPickMode(false);
+    if (r.route && r.route !== 'main') {
+      toast(`Sent ${r.count} exact edit${r.count > 1 ? 's' : ''} to ${r.route}. No main-session turn needed.`, 'ok', [], 5000);
+      return;
+    }
     toast(W.state.claudeListening
       ? `Sent ${r.count} edit${r.count > 1 ? 's' : ''} to Claude`
       : `Queued ${r.count}. Claude is not listening: run /live-edit in Claude Code`, W.state.claudeListening ? 'ok' : 'warn', [], 5000);
@@ -154,7 +158,7 @@ function announceFinished() {
   for (const b of fresh) {
     seen.add(b.id);
     const n = b.itemIds.length;
-    toast(`Claude applied ${n} edit${n > 1 ? 's' : ''}${b.changed.length ? ' · ' + b.changed.join(', ') : ''}`, 'ok',
+    toast(`${b.route && b.route !== 'main' ? b.route[0].toUpperCase() + b.route.slice(1) : 'Claude'} applied ${n} edit${n > 1 ? 's' : ''}${b.changed.length ? ' · ' + b.changed.join(', ') : ''}`, 'ok',
       [h('button.small.danger', { onclick: () => revert(b.id) }, 'Revert')], 9000);
   }
   // Remember older batches too, so a fresh tab does not replay them.

@@ -17,6 +17,7 @@ import { applyTextEdit } from './textEdit.js';
 import { captureItems } from './shots.js';
 import { listRefs } from './refs.js';
 import { closeShared } from './browser.js';
+import { batchIsMechanical, runFast } from './fast.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OVERLAY_DIR = path.join(HERE, 'overlay');
@@ -58,16 +59,67 @@ export async function startServer(opts) {
 
   const publicItems = () => ({
     items: store.state.items.filter((i) => i.status !== 'archived').slice(-200),
-    batches: store.state.batches.slice(-30).map(({ id, status, itemIds, createdAt, finishedAt, diff }) => ({
-      id, status, itemIds, createdAt, finishedAt, changed: diff ? diff.changed : [],
+    batches: store.state.batches.slice(-30).map(({ id, status, itemIds, createdAt, finishedAt, diff, route }) => ({
+      id, status, itemIds, createdAt, finishedAt, route, changed: diff ? diff.changed : [],
     })),
+    fastModel: fastModel || null,
     claudeListening: waiters.length > 0 || Date.now() - lastWaiterSeen < 4000,
     mode,
   });
 
   const statusChanged = () => broadcast('status', publicItems());
 
+  // ---- fast-model worker -------------------------------------------------------
+  // Mechanical batches (exact text or exact slider values) go to a headless Sonnet run
+  // instead of the main session. One run at a time, and never while the main session
+  // is mid-batch, so two models never edit the same files at once.
+  const fastModel = opts.fastModel === undefined ? 'sonnet' : opts.fastModel;
+  let fastRunning = false;
+  const mainBusy = () =>
+    store.state.batches.some((b) => b.status === 'applying' && b.model !== fastModel && Date.now() - (b.claimedAt || 0) < 10 * 60 * 1000);
+
+  async function pumpFast() {
+    if (fastRunning || mainBusy()) return;
+    const claimed = store.claimNext('fast-queued');
+    if (!claimed) return;
+    fastRunning = true;
+    claimed.batch.model = fastModel;
+    store.save();
+    statusChanged();
+    try {
+      const r = await (opts.runFast || runFast)({ ...claimed, root, mode, url: baseUrl }, { model: fastModel, claudeBin: opts.claudeBin });
+      const pending = claimed.batch.itemIds.filter((id) => store.item(id)?.status === 'applying');
+      const answered = pending.filter((id) => r.results[id]);
+      if (!answered.length && !r.ok) {
+        // The fast run never got going (no claude binary, auth, crash). If it changed
+        // nothing, hand the batch to the main session instead of failing it.
+        const diff = store.diffSnapshot(claimed.batch);
+        if (!diff.changed.length) {
+          claimed.batch.status = 'queued';
+          claimed.batch.model = null;
+          claimed.batch.fastError = r.error;
+          for (const id of pending) store.item(id).status = 'queued';
+          store.save();
+          process.stderr.write(`wed: ${fastModel} run failed (${r.error}); sent the batch to the main session instead
+`);
+          return;
+        }
+      }
+      for (const id of pending) {
+        const res = r.results[id] || { status: r.ok ? 'done' : 'failed', note: r.ok ? `applied by ${fastModel}` : `${fastModel} run failed: ${r.error}` };
+        store.finishItem(id, res.status, `${res.note} (${fastModel})`);
+      }
+      broadcast('reload', { reason: 'fast-done' });
+    } finally {
+      fastRunning = false;
+      statusChanged();
+      serveWaiters();
+      setImmediate(pumpFast);
+    }
+  }
+
   const serveWaiters = () => {
+    if (fastRunning) return;
     while (waiters.length) {
       const claimed = store.claimNext();
       if (!claimed) return;
@@ -147,24 +199,27 @@ export async function startServer(opts) {
     if (p === '/send' && m === 'POST') {
       const batch = store.send();
       if (!batch) return sendJson(res, 409, { error: 'nothing to send' });
-      statusChanged();
-      sendJson(res, 200, { batchId: batch.id, count: batch.itemIds.length });
-      // Screenshots are best effort and capped at 20 s so a slow page cannot stall Claude.
       const items = batch.itemIds.map((id) => store.item(id));
+      const fast = !!fastModel && batchIsMechanical(items);
+      statusChanged();
+      sendJson(res, 200, { batchId: batch.id, count: batch.itemIds.length, route: fast ? fastModel : 'main' });
+      // Screenshots are best effort and capped at 20 s so a slow page cannot stall Claude.
       const shots = opts.shots === false ? {} : await Promise.race([
         captureItems(baseUrl, items, path.join(store.dir, 'shots')).catch(() => ({})),
         new Promise((r) => setTimeout(() => r({}), opts.shotTimeout ?? 20000)),
       ]);
       for (const it of items) if (shots[it.id]) it.screenshot = shots[it.id];
-      batch.status = 'queued';
+      batch.status = fast ? 'fast-queued' : 'queued';
+      batch.route = fast ? fastModel : 'main';
       store.save();
-      serveWaiters();
       statusChanged();
+      if (fast) pumpFast();
+      else serveWaiters();
       return;
     }
     if (p === '/next' && m === 'GET') {
       lastWaiterSeen = Date.now();
-      const claimed = store.claimNext();
+      const claimed = fastRunning ? null : store.claimNext();
       if (claimed) {
         statusChanged();
         return sendJson(res, 200, { ...claimed, root, mode, url: baseUrl });
@@ -206,6 +261,7 @@ export async function startServer(opts) {
       }
       statusChanged();
       broadcast('reload', { reason: 'done' });
+      setImmediate(pumpFast);
       return sendJson(res, 200, { results });
     }
     if (p === '/revert' && m === 'POST') {
